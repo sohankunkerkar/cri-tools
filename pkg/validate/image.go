@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	"github.com/kubernetes-sigs/cri-tools/pkg/framework"
+	"k8s.io/apimachinery/pkg/api/errors"
 	internalapi "k8s.io/cri-api/pkg/apis"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 
@@ -166,6 +167,48 @@ var _ = framework.KubeDescribe("Image Manager", func() {
 			}
 		}
 	})
+
+	It("should handle signature validation failed error", func() {
+		imageName := "gcr.io/k8s-staging-cri-tools/test-image-1:latest"
+
+		_, err := c.PullImage(context.Background(), &runtimeapi.ImageSpec{
+			Image: imageName,
+		}, nil, testImagePodSandbox)
+		Expect(err).To(HaveOccurred())
+
+		_, err = c.ImageStatus(context.Background(), &runtimeapi.ImageSpec{
+			Image: imageName}, false)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsInvalid(err)).To(BeTrue())
+		Expect(err.Error()).To(ContainSubstring("signature validation failed"))
+
+		// Clean up by removing the pulled image
+		err = c.RemoveImage(context.Background(), &runtimeapi.ImageSpec{
+			Image: imageName,
+		})
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("should handle registry unavailable error", func() {
+		imageName := "registry.example.com/myimage:latest"
+
+		_, err := c.PullImage(context.Background(), &runtimeapi.ImageSpec{
+			Image: imageName,
+		}, nil, testImagePodSandbox)
+		Expect(err).To(HaveOccurred())
+
+		_, err = c.ImageStatus(context.Background(), &runtimeapi.ImageSpec{
+			Image: imageName}, false)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsInvalid(err)).To(BeTrue())
+		Expect(err.Error()).To(ContainSubstring("registry unavailable"))
+
+		// Clean up by removing the pulled image
+		err = c.RemoveImage(context.Background(), &runtimeapi.ImageSpec{
+			Image: imageName,
+		})
+		Expect(err).ToNot(HaveOccurred())
+	})
 })
 
 // testRemoveImage removes the image name imageName and check if it successes.
@@ -231,7 +274,7 @@ func removeDuplicates(ss []string) []string {
 	encountered := map[string]bool{}
 	result := []string{}
 	for _, s := range ss {
-		if encountered[s] == true {
+		if encountered[s] {
 			continue
 		}
 		encountered[s] = true
